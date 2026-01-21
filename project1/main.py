@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Counter, Iterable
 
 from nltk.tokenize import word_tokenize
 import jieba
@@ -229,6 +229,39 @@ def assert_model_integrity(t: dict[str, dict[str, float]]) -> None:
 
 # PART 4: Report translation table
 
+
+def top_source_words(
+    tokenized_pairs: Iterable[tuple[list[str], list[str]]],
+    top_n: int = 10,
+) -> list[tuple[str, int]]:
+    counter: Counter[str] = Counter()
+    for zh_tokens, _ in tokenized_pairs:
+        for token in zh_tokens:
+            if token == NULL_TOKEN:
+                continue
+            counter[token] += 1
+    return counter.most_common(top_n)
+
+
+def report_top_translations(
+    t: dict[str, dict[str, float]],
+    tokenized_pairs: Iterable[tuple[list[str], list[str]]],
+    top_f: int = 10,
+    top_e: int = 5,
+) -> None:
+    top_sources = top_source_words(tokenized_pairs, top_n=top_f)
+    print("\ntop translations for frequent source words:")
+    for f, count in top_sources:
+        translations = t.get(f, {})
+        # reverse because we want the most probable translations first!
+        # TODO: slice before sorting to save time (runs fast so I am ignoring this for now)
+        top_translations = sorted(
+            translations.items(), key=lambda item: item[1], reverse=True
+        )[:top_e]
+        formatted = ", ".join(f"{e}:{prob:.4f}" for e, prob in top_translations)
+        print(f"{f} (count={count}) -> {formatted}")
+
+
 # PART 5: Eval with perplexity
 
 # MAIN FUNCTION
@@ -246,6 +279,11 @@ def main() -> None:
     # Part 3: train IBM Model 1 (EM)
     t = em_train_ibm1(tokenized_pairs, iterations=5)
     print(f"Trained translation table for {len(t)} source tokens.")
+
+    # Part 4: report translation table
+    report_top_translations(t, tokenized_pairs, top_f=10, top_e=5)
+
+    # Part 5: evaluate perplexity
 
 
 if __name__ == "__main__":
