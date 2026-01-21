@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
+import math
 from pathlib import Path
-from typing import Counter, Iterable
+import random
+from typing import Iterable
 
 from nltk.tokenize import word_tokenize
 import jieba
@@ -264,7 +266,77 @@ def report_top_translations(
 
 # PART 5: Eval with perplexity
 
-# MAIN FUNCTION
+
+def build_target_vocab(
+    tokenized_pairs: Iterable[tuple[list[str], list[str]]],
+) -> list[str]:
+    vocab: set[str] = set()
+    for _, en_tokens in tokenized_pairs:
+        vocab.update(en_tokens)
+    return sorted(vocab)
+
+
+def sentence_log_prob(
+    f_tokens: list[str],
+    e_tokens: list[str],
+    t: dict[str, dict[str, float]],
+) -> float:
+    """
+    Compute log P(e | f) under IBM Model 1.
+    """
+    if not f_tokens or not e_tokens:
+        ValueError("f_tokens and e_tokens cannot be empty")
+
+    log_prob = 0.0
+    for e in e_tokens:
+        s_total = 0.0
+        for f in f_tokens:
+            s_total += t.get(f, {}).get(e, 0.0)
+        s_total = max(s_total, 1e-12)
+        log_prob += math.log(s_total)
+
+    return log_prob
+
+
+def perplexity_from_log_prob(log_prob: float, length: int) -> float:
+    if length <= 0:
+        return float("inf")
+    return math.exp(-log_prob / length)
+
+
+def sample_random_sentence(vocab: list[str], length: int) -> list[str]:
+    return [random.choice(vocab) for _ in range(length)]
+
+
+def evaluate_perplexity(
+    tokenized_pairs: list[tuple[list[str], list[str]]],
+    table: dict[str, dict[str, float]],
+    trials: int = 5,
+) -> None:
+    """
+    Compare perplexity of real translations vs random target sentences
+    of the same length.
+    """
+    vocab = build_target_vocab(tokenized_pairs)
+    if not vocab:
+        raise ValueError("Target vocabulary is empty.")
+
+    random.seed(0)
+    print("\nPerplexity comparison (real vs random):")
+    for i in range(trials):
+        f_tokens, e_tokens = random.choice(tokenized_pairs)
+        random_e = sample_random_sentence(vocab, len(e_tokens))
+
+        log_p_real = sentence_log_prob(f_tokens, e_tokens, table)
+        log_p_rand = sentence_log_prob(f_tokens, random_e, table)
+
+        ppl_real = perplexity_from_log_prob(log_p_real, len(e_tokens))
+        ppl_rand = perplexity_from_log_prob(log_p_rand, len(e_tokens))
+
+        print(f"Trial {i + 1}: real={ppl_real:.4f}, random={ppl_rand:.4f}")
+
+
+# Main Function
 
 
 def main() -> None:
@@ -277,13 +349,14 @@ def main() -> None:
     print(f"Tokenized {len(tokenized_pairs)} sentence pairs.")
 
     # Part 3: train IBM Model 1 (EM)
-    t = em_train_ibm1(tokenized_pairs, iterations=5)
-    print(f"Trained translation table for {len(t)} source tokens.")
+    table = em_train_ibm1(tokenized_pairs, iterations=5)
+    print(f"Trained translation table for {len(table)} source tokens.")
 
     # Part 4: report translation table
-    report_top_translations(t, tokenized_pairs, top_f=10, top_e=5)
+    report_top_translations(table, tokenized_pairs, top_f=10, top_e=5)
 
     # Part 5: evaluate perplexity
+    evaluate_perplexity(tokenized_pairs, table, trials=5)
 
 
 if __name__ == "__main__":
